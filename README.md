@@ -1,6 +1,7 @@
 # 🎨 Visual jsPsych Experiment Builder
 
 **Build jsPsych experiments visually**  
+
 A **locally running web app** based on **Reflex** that lets you design, preview, and export experiments with ease.
 
 ---
