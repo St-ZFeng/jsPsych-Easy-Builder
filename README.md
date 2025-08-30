@@ -1,5 +1,7 @@
 # 🎨 Visual jsPsych Experiment Builder
 
+[中文说明](https://gitee.com/zfASA/jsPsych-Easy-Builder/tree/main)
+
 **Build jsPsych experiments visually**  
 
 A **locally running web app** based on **Reflex** that lets you design, preview, and export experiments with ease.
