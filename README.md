@@ -15,19 +15,22 @@ A **locally running web app** based on **Reflex** that lets you design, preview,
 | ⚙️ **Customizable Parameters** | Adjust timing, trial settings, and stimuli easily. |
 | 👀 **Real-Time Preview** | Instantly see how your experiment behaves. |
 
-⚠️ Only prepared for Windows.
+⚠️ Only prepared for Windows now.
 
 ---
 
 ## 🚀 Quick Start
 
 1. **Download from the releases:**
+   
    `jsPsych_Easy_Builder.zip`
 
-2. **Unzip and double-click:**
+3. **Unzip and double-click:**
+   
    `jsPsych_Easy_Builder.exe`
 
-3. **Open in your browser:**  
+4. **Open in your browser:**
+     
    `http://localhost:3000`
 
 ---
