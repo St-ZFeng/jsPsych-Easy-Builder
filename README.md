@@ -11,9 +11,9 @@ A **locally running web app** based on **Reflex** that lets you design, preview,
 | Feature | Description |
 |---------|-------------|
 | 🖱 **Visual Experiment Design** | Click interface to create experiments without code. |
+| ⚡ **Quick Start** | Launch experiments quickly without complex environment setup. |
 | 📦 **Code Export** | Export ready-to-run jsPsych code for online or offline use. |
 | 🧩 **Component Library** | Pre-built trial types and stimuli for quick setup. |
-| ⚙️ **Customizable Parameters** | Adjust timing, trial settings, and stimuli easily. |
 | 👀 **Real-Time Preview** | Instantly see how your experiment behaves. |
 
 ⚠️ Only prepared for Windows now.
