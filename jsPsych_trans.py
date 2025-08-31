@@ -330,6 +330,7 @@ class Plugin:
     
     def set_params(self, params_list):
         def convert_value(val, val_type):
+
             if type(val)==str and val.startswith("$"):
                 return val
             elif val == None:
@@ -346,6 +347,8 @@ class Plugin:
                 return str(val).split(",") if "," in str(val) else str(val)
             elif val_type == "free":
                 return val
+            elif val_type == "html_string":
+                return str(val)
             else:
                 return str(val)
 
@@ -356,12 +359,17 @@ class Plugin:
                 return convert_value(val, val_type)
             if val == None:
                 return None
+            if isinstance(val[0], list):
+                for i in range(len(val)):
+                    val_i=convert_array(val[i], val_type)
+                    val[i]=val_i
+                return val
             elif val_type == "int":
-                return [int(x) if not x.startswith("$") else x for x in val ]
+                return [int(x) if not str(x).startswith("$") else x for x in val ]
             elif val_type == "float":
-                return [float(x) if not x.startswith("$") else x for x in val ]
+                return [float(x) if not str(x).startswith("$") else x for x in val ]
             elif val_type == "bool":
-                return [bool(x) if not x.startswith("$") else x for x in val ]
+                return [bool(x) if not str(x).startswith("$") else x for x in val ]
             elif val_type == "free":
                 return [x for x in val]
             else:
@@ -431,16 +439,15 @@ class Plugin:
         js_json["$type"]="$"+self.class_name
         for param in self.params:
             if self.params[param]["type"]!="complex":
-                #print(param)
-                #print(self.params[param]["default"],self.params[param]["value"])
-                if self.params[param]["undefined"]:
+                if self.params[param]["default"]!=self.params[param]["value"]:
+                    if self.params[param]["type"] in ("function", "object"):
+                        js_json["$"+param]="$"+str(self.params[param]["value"])
+                    elif self.params[param]["type"] in ("html_string") :
+                        js_json["$"+param]=f"$`{str(self.params[param]["value"])}`"
+                    else:
+                        js_json["$"+param]=self.params[param]["value"]
+                elif self.params[param]["undefined"]:
                     js_json["$"+param]=self.params[param]["value"]
-                else:
-                    if self.params[param]["default"]!=self.params[param]["value"]:
-                        if self.params[param]["type"] in ("function", "object"):
-                            js_json["$"+param]="$"+str(self.params[param]["value"])
-                        else:
-                            js_json["$"+param]=self.params[param]["value"]
             else:
                 if self.params[param]["value"]:
                     if len(self.params[param]["value"])!=0:
@@ -451,6 +458,8 @@ class Plugin:
                                 if self.params[param]["nested"][nested_param]["default"]!=val[nested_param]["value"]:
                                     if self.params[param]["type"] in ("function", "object"):
                                         nested_json["$"+nested_param]="$"+str(val[nested_param]["value"])
+                                    elif self.params[param]["type"] in ("html_string") :
+                                        nested_json["$"+nested_param]=f"$`{str(val[nested_param]["value"])}`"
                                     else:
                                         nested_json["$"+nested_param]=val[nested_param]["value"]
                                     
@@ -458,6 +467,7 @@ class Plugin:
                         js_json["$"+param]=complex_list
         js_json_text= json.dumps(js_json, indent=8, ensure_ascii=False)
         js_json_text=remove_dollar(js_json_text)
+        js_json_text=js_json_text.encode('utf-8').decode('unicode_escape')
         if js_type=='push':
             js_json_text=f"    var {self.name} = {js_json_text};\n    timeline.push({self.name});\n\n"
         else:
@@ -481,7 +491,12 @@ class code(Plugin):
     def js_source(self,plugin_source='Web'):
         return ''
     def to_js(self,js_type='push'):
-        return f'    {self.params['code']['value']}\n'
+        #每一行前添加    
+        js_code_split=self.params['code']['value'].strip().split("\n")
+        js_code=""
+        for line in js_code_split:
+            js_code+=f"    {line.strip()}\n"
+        return js_code+"\n"
     
 class procedure_start(Plugin):
     def __init__(self, exp, name=None):
@@ -743,6 +758,7 @@ class Expriment:
             if self.plugin_used[plugin].plugin_name not in plugin_source_added:
                 plugin_source+=self.plugin_used[plugin].js_source(self.plugin_source)
                 plugin_source_added.append(self.plugin_used[plugin].plugin_name)
+ 
         if len(in_procedure)>0:
             for i in range(len(in_procedure)):
                 if i==len(in_procedure)-1:
@@ -759,7 +775,7 @@ class Expriment:
     <title>[[[[name]]]]</title>
     <script src="[[[[js_source]]]]"></script>
 [[[[plugin_source]]]]    <link href="[[[[css_source]]]]" rel="stylesheet" type="text/css" />
-    [[[[head_script]]]]
+[[[[head_script]]]]
   </head>
   <body></body>
   <script>
@@ -801,11 +817,11 @@ class Expriment:
             template=template.replace('[[[[on_finish]]]]',"{on_finish: function() {jsPsych.data.get().localSave('csv',jsPsych.randomization.randomID(6)+'_data.csv');}}")
 
         elif data_save_type=='NAODAO':
-            head_script=head_script+'\n    <script src="https://www.naodao.com/public/experiment/libs/extension/naodao-2021-12.js"></script>'
+            head_script=head_script+'\n<script src="https://www.naodao.com/public/experiment/libs/extension/naodao-2021-12.js"></script>'
             template=template.replace('[[[[on_finish]]]]',"{extensions: [{type: Naodao}]}")
 
         elif data_save_type=='Credamo':
-            head_script=head_script+'\n    <script src="/jspsych/static/credamo-jspsych.min.js"></script>'
+            head_script=head_script+'\n<script src="/jspsych/static/credamo-jspsych.min.js"></script>'
             template=template.replace('[[[[on_finish]]]]',"{on_finish: function() {onCredamoEndTrialFinish(jsPsych.data.get().csv());}}")
 
         elif data_save_type=='JATOS':
@@ -830,10 +846,13 @@ class Expriment:
         document.write("<p>End</p>")
       }}""")
         
-        
+        head_script_split=head_script.strip().split("\n")
+        head_script=""
+        for line in head_script_split:
+            head_script+=f"    {line.strip()}\n"
         template=template.replace('[[[[head_script]]]]',head_script)
         plugin_source,plugin_define=self.timeline_to_js()
-        
+
         if data_save_type=='NAODAO':
             save_plugin=self.plugin_all['html-keyboard-response'](self,name='naodao_save_date')
             save_plugin.params['trial_duration']['value']=100
@@ -844,7 +863,7 @@ class Expriment:
                 plugin_source+=save_plugin.js_source(self.plugin_source)
         template=template.replace('[[[[plugin_source]]]]',plugin_source)
         template=template.replace('[[[[plugin_define]]]]',plugin_define)
-        
+
         return template 
     def preview(self):
         return self.to_js('Web','Display')
