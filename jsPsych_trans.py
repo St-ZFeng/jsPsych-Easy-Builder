@@ -359,7 +359,7 @@ class Plugin:
                 return convert_value(val, val_type)
             if val == None:
                 return None
-            if isinstance(val[0], list):
+            if val and isinstance(val[0], list):
                 for i in range(len(val)):
                     val_i=convert_array(val[i], val_type)
                     val[i]=val_i
@@ -401,9 +401,8 @@ class Plugin:
                     else:
                         lst = val if isinstance(val, list) else [val]
                     value_list = []
-
                     for sublist in lst:
-                        nested_params = param_def["nested"]
+                        nested_params = copy.deepcopy(param_def["nested"])
                         for sub in sublist:
                             if isinstance(params_list, list):
                                 sub_name = sub["name"]
