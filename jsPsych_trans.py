@@ -3,13 +3,26 @@ import re
 import os
 import json
 import copy
-
+import codecs
 
 
 plgin_dir="dist"
+
+
+def decode_all_escapes(text):
+    def replace_escape(match):
+        escape_seq = match.group(0)
+        try:
+            return codecs.decode(escape_seq, 'unicode-escape')
+        except:
+            return escape_seq
+    pattern = r'\\.'
+    return re.sub(pattern, replace_escape, text)
+
+
 def remove_dollar(text):
         pattern = re.compile(r'''
-        (["'])              
+        (["'`])              
         (                  
         \$               
         (?:                
@@ -29,7 +42,7 @@ def remove_dollar(text):
                 unescaped = content
             return unescaped
 
-        return pattern.sub(replacer, text)
+        return pattern.sub(replacer, pattern.sub(replacer, text))
 
 def extract_block(text, start_keyword='parameters: {'):
     stid=text.find("var version =")
@@ -204,8 +217,6 @@ def trans_param_python(param):
     if 'nested' in param:
         for param_sub in param["nested"]:
             ##print(param_sub)
-            if param_sub=='required':
-                param["nested"][param_sub]['default']="true"
             param["nested"][param_sub]=trans_param_python(param["nested"][param_sub])
     return param
 
@@ -265,6 +276,7 @@ class Plugin:
         self.version=version
         self.plugin_params=params
         self.data=data
+        self.disabled=False
         self.js_file=js_file
         self.exp=exp
         self.web_js_file=f"https://unpkg.com/@jspsych/plugin-{plugin_name}@{version}"
@@ -288,6 +300,8 @@ class Plugin:
         else:
             self.name=plugin_name.replace("-","_")
     def js_source(self,plugin_source='Web'):
+        if self.disabled:
+            return ''
         source_text=""
         if plugin_source=='Local':
             source_text+=f'    <script src="{self.js_file}"></script>\n'
@@ -434,6 +448,8 @@ class Plugin:
     
     
     def to_js(self,js_type='push'):
+        if self.disabled:
+            return ''
         js_json={}
         js_json["$type"]="$"+self.class_name
         for param in self.params:
@@ -441,7 +457,7 @@ class Plugin:
                 if self.params[param]["default"]!=self.params[param]["value"]:
                     if self.params[param]["type"] in ("function", "object"):
                         js_json["$"+param]="$"+str(self.params[param]["value"])
-                    elif self.params[param]["type"] in ("html_string") :
+                    elif self.params[param]["type"] == "html_string" :
                         js_json["$"+param]=f"$`{str(self.params[param]["value"])}`"
                     else:
                         js_json["$"+param]=self.params[param]["value"]
@@ -455,9 +471,9 @@ class Plugin:
                             nested_json={}
                             for nested_param in self.params[param]["nested"]:
                                 if self.params[param]["nested"][nested_param]["default"]!=val[nested_param]["value"]:
-                                    if self.params[param]["type"] in ("function", "object"):
+                                    if self.params[param]["nested"][nested_param]["type"] in ("function", "object"):
                                         nested_json["$"+nested_param]="$"+str(val[nested_param]["value"])
-                                    elif self.params[param]["type"] in ("html_string") :
+                                    elif self.params[param]["nested"][nested_param]["type"] == "html_string" :
                                         nested_json["$"+nested_param]=f"$`{str(val[nested_param]["value"])}`"
                                     else:
                                         nested_json["$"+nested_param]=val[nested_param]["value"]
@@ -466,7 +482,7 @@ class Plugin:
                         js_json["$"+param]=complex_list
         js_json_text= json.dumps(js_json, indent=8, ensure_ascii=False)
         js_json_text=remove_dollar(js_json_text)
-        js_json_text=js_json_text.encode('utf-8').decode('unicode_escape')
+        js_json_text=decode_all_escapes(js_json_text)
         if js_type=='push':
             js_json_text=f"    var {self.name} = {js_json_text};\n    timeline.push({self.name});\n\n"
         else:
@@ -490,11 +506,41 @@ class code(Plugin):
     def js_source(self,plugin_source='Web'):
         return ''
     def to_js(self,js_type='push'):
+        if self.disabled:
+            return ''
         #每一行前添加    
         js_code_split=self.params['code']['value'].strip().split("\n")
         js_code=""
         for line in js_code_split:
             js_code+=f"    {line.strip()}\n"
+        return js_code+"\n"
+
+class data_variable(Plugin):
+    def __init__(self, exp, name=None):
+            super(self.__class__, self).__init__(
+                class_name='data-variable',
+                plugin_name='data-variable',
+                version='0.0',
+                params={'data_value':{"type":"function","default":'',"value":'',"array":False,"undefined":False}},
+                data={},
+                js_file='',
+                name=name,
+                exp=exp
+            )
+            self.common_params={}
+            self.params={'data_value':{"type":"function","default":'',"value":'',"array":False,"undefined":False}}
+
+
+    def js_source(self,plugin_source='Web'):
+        return ''
+    def to_js(self,js_type='push'):
+        if self.disabled:
+            return ''
+        #每一行前添加    
+        js_code_split=self.params['data_value']['value'].strip().split("\n")
+        js_code=f"    var {self.name} = "
+        for line in js_code_split:
+            js_code+=f" {line.strip()}\n"
         return js_code+"\n"
     
 class procedure_start(Plugin):
@@ -534,6 +580,8 @@ class procedure_start(Plugin):
     def js_source(self,plugin_source='Web'):
         return ''
     def to_js(self,js_type='push'):
+        if self.disabled:
+            return ''
         js_json={}
         js_json["$timeline"]=['$'+ timeline for timeline in self.timeline]
         for param in self.params:
@@ -616,6 +664,7 @@ def registry_plugin():
             {"__init__": __init__}
         )
         plugin_registry[class_name] = subclass
+    plugin_registry["data-variable"] = data_variable
     plugin_registry["code"] = code
     plugin_registry["procedure-start"] = procedure_start
     plugin_registry["procedure-end"] = procedure_end
@@ -650,15 +699,6 @@ class Expriment:
         
 
     def import_from_json(self, timeline_list):
-        start_time = time.time()  # 记录函数开始时间
-        step_times = {
-            "extract_name_type": 0,
-            "check_plugin_used": 0,
-            "create_plugin_instance": 0,
-            "set_params": 0,
-            "deepcopy_plugin": 0,
-            "append_timeline": 0,
-        }
 
         for plugin_setting in timeline_list:
 
@@ -673,10 +713,19 @@ class Expriment:
             else:
                 plugin_type = plugin_setting["params"]["type"]
 
+            if "disabled" in plugin_setting:
+                plugin_disabled = plugin_setting["disabled"]
+            elif 'params' in plugin_setting and "disabled" in plugin_setting["params"]:
+                plugin_disabled = plugin_setting["params"]["disabled"]
+            else:
+                plugin_disabled = False
+            
+            
             if "params" in plugin_setting:
                 plugin_params = plugin_setting["params"]
             else:
                 plugin_params = plugin_setting
+
             # 检查 plugin_name 是否在 self.plugin_used 中
             if plugin_name not in self.plugin_used:
 
@@ -687,11 +736,11 @@ class Expriment:
                 plugin.set_params(plugin_params)
 
                 self.plugin_used[plugin_name] = plugin
-
-                self.timeline.append(plugin_name)
+                if not plugin_disabled:
+                    self.timeline.append(plugin_name)
             else:
-                # 如果插件已存在，仅添加到 timeline
-                self.timeline.append(plugin_name)
+                if not plugin_disabled:
+                    self.timeline.append(plugin_name)
 
 
             
