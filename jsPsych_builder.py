@@ -11,8 +11,6 @@ import shutil
 import csv
 from fastapi import FastAPI, Request
 from openpyxl import load_workbook
-import time
-from functools import wraps
 
 
 
@@ -27,7 +25,6 @@ if mode == 'Local':
         csv_text = raw_csv_data.decode('utf-8')
 
         if 'trial_index' in csv_text:
-            # 3. 确保 data 文件夹存在
             data_dir = "data"
             os.makedirs(data_dir, exist_ok=True) 
 
@@ -102,7 +99,7 @@ def file_to_json_list(file_path):
         raise ValueError("Only for .csv and .xlsx")
 
 def read_csv(file_path):
-    with open(file_path, 'r', encoding='utf-8') as csv_file:
+    with open(file_path, 'r', encoding='utf-8-sig') as csv_file:
         reader = csv.DictReader(csv_file)
         return [row for row in reader]
 
@@ -110,17 +107,14 @@ def read_excel(file_path):
     wb = load_workbook(filename=file_path, read_only=True)
     sheet = wb.active
     
-    # 获取标题行
     headers = []
     for cell in sheet[1]:
         headers.append(cell.value)
     
-    # 处理数据行
     json_list = []
     for row in sheet.iter_rows(min_row=2, values_only=True):
         row_dict = {}
         for i, value in enumerate(row):
-            # 处理None值（空单元格）
             if value is None:
                 value = ""
             row_dict[headers[i]] = str(value) if value is not None else ""
@@ -130,7 +124,6 @@ def read_excel(file_path):
     return json_list
 
     
-    return json_list
 for plugin_name in plugin_registry:
     plugin_dict[plugin_name]=plugin_registry[plugin_name](exp_test)
     params_dict[plugin_name]={"type":plugin_name,"name":plugin_name.replace("-","_"),"params":plugin_dict[plugin_name].params}
@@ -140,9 +133,10 @@ for plugin_name in plugin_registry:
     for param in plugin_dict[plugin_name].params:
         
         simple[param]=plugin_dict[plugin_name].params[param]["value"]
-        simple["name"]=plugin_name.replace("-","_")
-        simple["type"]=plugin_name
+    simple["name"]=plugin_name.replace("-","_")
+    simple["type"]=plugin_name
     simple_params[plugin_name]=trans_to_form_date(plugin_dict,simple)
+    simple_params[plugin_name]["disabled"]=False
 
 class Preview_state(rx.State):
     iframe_key: int = 0 
@@ -182,7 +176,7 @@ class Uploaded_files_state(rx.State):
         user_floder=await self.get_var_value(State.user_floder)
         files = list(user_floder.iterdir())
         files = [item for item in files if item.is_file()]
-        # 过滤掉匹配排除模式的文件
+    
         filtered_files = [
             file for file in files
             if file.name not in ['dist','index.html','index_preview.html','setting.jsexp']
@@ -231,13 +225,15 @@ class complex_temp_state(rx.State):
         complex_source=params_dict[plugin_name]['params'][param_name]['nested']
         complex_temp={}
         for param in complex_source:
-            complex_temp[param]=trans_to_form_param(complex_source[param]['type'],complex_source[param]['default'])
+            if param=='required':
+                complex_temp[param]=True
+            else:
+                complex_temp[param]=trans_to_form_param(complex_source[param]['type'],complex_source[param]['default'])
         if index==None:
             self.complex_list_temp.append(complex_temp)
         else:
             complex_list=await self.get_var_value(State.complex_list)
             complex_list[index].append(complex_temp)
-
     
     async def delete_complex_temp(self, complex_id,id):
         if id==None:
@@ -306,7 +302,7 @@ class State(rx.State):
     @rx.event
     async def set_user_floder(self):
         user_dir = rx.get_upload_dir()
-        user_dir.mkdir(parents=True, exist_ok=True)  # 确保 User 文件夹存在
+        user_dir.mkdir(parents=True, exist_ok=True)  
         if self.first_open:
             self.first_open=False
             if mode=="Local":
@@ -319,7 +315,6 @@ class State(rx.State):
                 while True:
                     folder_name = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
                     random_folder = user_dir / folder_name
-                    # 如果目录不存在，则创建并返回
                     if not random_folder.exists():
                         random_folder.mkdir()
                         self.user_floder=random_folder
@@ -427,6 +422,8 @@ class State(rx.State):
 
     @rx.event
     async def load_exp_json(self, file_path=None):
+        
+
         if file_path is None:
             filename = "setting.jsexp"
             file_path = self.user_floder / filename
@@ -436,7 +433,13 @@ class State(rx.State):
             self.plugin_source = json_data.get('plugin_source')
             self.data_save = json_data.get('data_save')
             self.head_script = json_data.get('head_script')
-            self.timeline =[]
+
+            self.timeline=[]
+            self.complex_list=[]
+            self.name_used =['jsPsych','timeline']  
+            self.procedure_list=[]
+            self.Unterminated_procedure_list=[]
+
             self.simple_params_state= copy.deepcopy(simple_params)
             for point,complex_i in zip(json_data.get('timeline'),json_data.get('complex_list')):
                 self.timeline_push(point,complex_i)
@@ -486,7 +489,6 @@ class State(rx.State):
         
         with zipfile.ZipFile(output_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for root, dirs, files in os.walk(folder_path):
-                # 在遍历时就从dirs中移除要排除的文件夹，避免进入这些文件夹
                 dirs[:] = [d for d in dirs if str(Path(root).relative_to(folder_path) / d) not in excluded_items]
                 
                 for file in files:
@@ -494,20 +496,16 @@ class State(rx.State):
                     relative_path = file_path.relative_to(folder_path)
                     relative_str = str(relative_path)
                     
-                    # 检查是否应该排除
                     should_exclude = False
                     
-                    # 检查完整路径是否在排除列表中（文件或文件夹）
                     for excluded_item in excluded_items:
                         if relative_str == excluded_item or relative_str.startswith(excluded_item + '/'):
                             should_exclude = True
                             break
                     
-                    # 检查文件扩展名是否在排除列表中
                     if file_path.suffix.lower() in [ext.lower() for ext in excluded_extensions]:
                         should_exclude = True
                     
-                    # 如果不需要排除，则添加到zip
                     if not should_exclude:
                         zipf.write(file_path, relative_path)
 
@@ -546,7 +544,7 @@ class State(rx.State):
             
             for timepoint in self.timeline:
                 timeline_date.append(self.timeline_temp_to_date(timepoint))
-            
+            #print(timeline_date)
             my_exp=Expriment(self.exp_name,plugin_all=plugin_registry, timeline_list=timeline_date,data_save=self.data_save,plugin_source=self.plugin_source,head_script=self.head_script)
             self.create_preview_file(my_exp.preview())
             
@@ -612,7 +610,10 @@ class State(rx.State):
         for param in param_temp:
             if param in ('name','type'):
                 continue
-            if param_source["params"][param]['type']!='complex':
+            elif param == 'disabled':
+                param_temp[param]=param_temp[param]
+                continue
+            elif param_source["params"][param]['type']!='complex':
                 param_temp[param]=self.timeline_param_to_date(param_temp[param],param_source["params"][param]['type'],param_source["params"][param]['default'],param_source["params"][param]['array'])
             else:
                 for i in range(len(param_temp[param])):
@@ -626,7 +627,6 @@ class State(rx.State):
 
     @rx.event
     async def add_plugin(self,plugin_name, form_data: dict):
-
         param_source=params_dict[plugin_name]
         param_temp=copy.deepcopy(simple_params[plugin_name])
         sorted_complex=[]
@@ -635,6 +635,8 @@ class State(rx.State):
         
         for param in param_temp:
             if param in ('name','type'):
+                continue
+            if param == 'disabled':
                 continue
             if param_source["params"][param]['type']!='complex':
                 if param_source["params"][param]['type']=="bool":
@@ -649,7 +651,7 @@ class State(rx.State):
                         param_temp[param]=True
                     else:
                         param_temp[param]=str(form_data[param])
-                elif param=='timeline_variables' and (form_data[param].endswith('.csv') or form_data[param].endswith('.xlsx')):
+                elif (param=='timeline_variables' or param=='data_value') and (form_data[param].endswith('.csv') or form_data[param].endswith('.xlsx')):
                     csv_file = self.user_floder / form_data[param]
                     var_list=file_to_json_list(str(csv_file))
                     changed_var_list=[]
@@ -668,7 +670,6 @@ class State(rx.State):
                     param_temp[param]=str(form_data[param])
             else:
                 result = {}
-                # 遍历原始字典
                 for key, value in form_data.items():
                     if key.startswith(param + '_'):
                         remaining_part = key[len(param)+1:]
@@ -676,7 +677,7 @@ class State(rx.State):
                         
                         if len(parts) >= 2:
                             try:
-                                num = int(parts[-1])
+                                num = str(parts[-1])
                             except ValueError:
                                 continue 
                             new_key = '_'.join(parts[:-1])
@@ -701,19 +702,20 @@ class State(rx.State):
                 for id in result:
                     for sub_param in param_source["params"][param]['nested']:
                         if sub_param not in result[id]:
-                            result[num][sub_param] = False
-                sorted_complex = [result[num] for num in sorted(result.keys())]
+                            result[id][sub_param] = False
+                sorted_complex = [result[id] for id in sorted(result.keys())]
                 param_temp[param]=sorted_complex
         
-        
-        if form_data['add_or_move_point']=='At the end':
+        point=int(form_data['add_or_move_point'].replace('index_',''))
+        if point==-1:#'At the end':
             self.timeline_push(param_temp, sorted_complex)
         else:
-            before_name=form_data['add_or_move_point'].replace('Before the ',"")
-            for i in range(len(self.timeline)):
-                if self.timeline[i]['name']==before_name:
-                    self.timeline_push(param_temp, sorted_complex,i)
-                    break
+            self.timeline_push(param_temp, sorted_complex,point)
+            #before_name=form_data['add_or_move_point'].replace('Before the ',"")
+            #for i in range(len(self.timeline)):
+                #if self.timeline[i]['name']==before_name:
+                    #self.timeline_push(param_temp, sorted_complex,i)
+                    #break
         
         self.update_next_name(param_temp['type'])
         
@@ -741,6 +743,14 @@ class State(rx.State):
         for param in param_temp:
             if param in ('name','type'):
                 continue
+            if param == 'disabled':
+                if param not in form_data:
+                    param_temp[param]=False
+                elif form_data[param]=='on':
+                    param_temp[param]=True
+                else:
+                    param_temp[param]=False
+                continue
             if param_source["params"][param]['type']!='complex':
                 if param_source["params"][param]['type']=="bool":
                     if param not in form_data:
@@ -753,7 +763,7 @@ class State(rx.State):
                         param_temp[param]=True
                     else:
                         param_temp[param]=str(form_data[param])
-                elif param=='timeline_variables' and (form_data[param].endswith('.csv') or form_data[param].endswith('.xlsx')):
+                elif (param=='timeline_variables' or param=='data_value') and (form_data[param].endswith('.csv') or form_data[param].endswith('.xlsx')):
                     csv_file = self.user_floder / form_data[param]
                     var_list=file_to_json_list(str(csv_file))
                     changed_var_list=[]
@@ -811,25 +821,51 @@ class State(rx.State):
         if param_temp!=self.timeline[index]:
             self.timeline_edit(param_temp,sorted_complex,index)
             await self.refresh_iframe()
-
-        if form_data['add_or_move_point']=='Original':
+        point=int(form_data['add_or_move_point'].replace('index_',''))
+        if "move_type" in form_data:
+            move_type=form_data['move_type']
+        else:
+            move_type='Move'
+        if point==-2:
             pass
         else:
-            self.timeline_delete(index,True)
-            if form_data['add_or_move_point']=='At the end':
-                self.timeline_push(param_temp, sorted_complex)
+            if move_type=='Move':
+                self.timeline_delete(index,True)
+                if point==-1:
+                    self.timeline_push(param_temp, sorted_complex)
+                else:
+                    if point<=index:
+                        self.timeline_push(param_temp, sorted_complex,point)
+                    else:
+                        point=point-1
+                        self.timeline_push(param_temp, sorted_complex,point)
+                    #before_name=form_data['add_or_move_point'].replace('Before the ',"")
+                    #for i in range(len(self.timeline)):
+                        #if self.timeline[i]['name']==before_name:
+                            #self.timeline_push(param_temp, sorted_complex,i)
+                            #break
+                if plugin_name=='procedure-start':
+                    for i in range(len(self.timeline)):
+                        if self.timeline[i]['type']=='procedure-end' and self.timeline[i]['connect']==form_data['name']:
+                            self.Unterminated_procedure_list=[x for x in self.Unterminated_procedure_list if x != self.timeline[i]['connect']] 
+                            break
+                await self.refresh_iframe()
             else:
-                before_name=form_data['add_or_move_point'].replace('Before the ',"")
-                for i in range(len(self.timeline)):
-                    if self.timeline[i]['name']==before_name:
-                        self.timeline_push(param_temp, sorted_complex,i)
+                param_temp_t=copy.deepcopy(param_temp)
+                sorted_complex_t=copy.deepcopy(sorted_complex)
+                num=1
+                while True:
+                    if param_temp['name']+f"_c{num}" not in self.name_used:
+                        param_temp_t['name']=param_temp['name']+f"_c{num}"
                         break
-            if plugin_name=='procedure-start':
-                for i in range(len(self.timeline)):
-                    if self.timeline[i]['type']=='procedure-end' and self.timeline[i]['connect']==form_data['name']:
-                        self.Unterminated_procedure_list=[x for x in self.Unterminated_procedure_list if x != self.timeline[i]['connect']] 
-                        break
-            await self.refresh_iframe()
+                    num+=1
+                    
+                
+                if point==-1:
+                    self.timeline_push(param_temp_t, sorted_complex_t)
+                else:
+                    self.timeline_push(param_temp_t, sorted_complex_t,point)
+                await self.refresh_iframe()
         old_name=self.timeline[index]['name']
         if param_temp['name']!=old_name:
             self.update_next_name(param_temp['type'])
@@ -882,17 +918,29 @@ def flow_card(flow: dict[str, Any], index: int) -> rx.Component:
     cases = [
         (
             State.simple_params_state[pl]["type"],
-            plugin_overlap_edit(plugin_name=pl, simple_params_by_plugin=flow, index=index,complex_list=State.complex_list[index]),
+            plugin_overlap_edit(plugin_name=pl, simple_params_by_plugin=flow, index=index,complex_list=State.complex_list[index])
         )
         for pl in simple_params
     ]
+    def name_tooltip_text(flow: dict[str, Any],color:str=None):
+        if color:
+            return rx.tooltip(rx.text(flow["name"].to(str),align="center",justify="center",color= color),content=flow["type"].to(str))
+        return rx.tooltip(rx.text(flow["name"].to(str),align="center",justify="center"),content=flow["type"].to(str))
     
+    
+
     return rx.box(rx.cond((flow['type']==State.simple_params_state['procedure-start']["type"])|(flow['type']==State.simple_params_state['procedure-end']["type"]),
         rx.dialog.root(
-        rx.dialog.trigger(rx.button(
-        rx.cond(flow['type']==State.simple_params_state['procedure-start']["type"],
-            rx.box(rx.hstack(rx.icon('arrow-right-from-line',align="center",justify="center"),rx.text(flow["name"].to(str),align="center",justify="center"),align="center",justify="center",align_items="center",)),
-            rx.box(rx.hstack(rx.text(flow["name"].to(str),align="center",justify="center"),rx.icon('arrow-left-from-line',align="center",justify="center")),align="center",justify="center",align_items="center",)),
+        rx.dialog.trigger(
+            
+        rx.button(
+            rx.cond(flow['type']==State.simple_params_state['procedure-start']["type"],
+                rx.box(rx.hstack(rx.icon('arrow-right-from-line',align="center",justify="center"),rx.cond(
+                flow['disabled'],name_tooltip_text(flow,color='gray'),name_tooltip_text(flow)
+            ),align="center",justify="center",align_items="center",)),
+            rx.box(rx.hstack(rx.cond(
+            flow['disabled'],name_tooltip_text(flow,color='gray'),name_tooltip_text(flow)
+        ),rx.icon('arrow-left-from-line',align="center",justify="center")),align="center",justify="center",align_items="center",)),
         size="2",
         style={
             "flex": "0 0 auto",
@@ -906,15 +954,19 @@ def flow_card(flow: dict[str, Any], index: int) -> rx.Component:
             "box_shadow": "0 1px 2px rgba(0,0,0,0.1)", 
             "margin_top": "12px",   
         }
-    )),
+    )
+    
+    ),
         rx.dialog.content(
                 rx.match(flow.get("type"), *cases, rx.fragment()),key=f'dialog-edit-{index}'
-                ,max_width="450px",
+                ,max_width="600px",
                 max_height="650px",
                 overflow_y="auto",
-                force_mount=True ,on_close_auto_focus=Csv_state.clear),force_mount=True),rx.dialog.root(
+                force_mount=True ,on_close_auto_focus=Csv_state.clear,on_interact_outside=rx.prevent_default),force_mount=True),rx.dialog.root(
         rx.dialog.trigger(rx.button(
-        flow["name"].to(str),
+        rx.cond(
+            flow['disabled'],name_tooltip_text(flow,color='gray'),name_tooltip_text(flow)
+        ),
         size="2",
         style={
             "flex": "0 0 auto",
@@ -934,7 +986,7 @@ def flow_card(flow: dict[str, Any], index: int) -> rx.Component:
                 ,max_width="600px",
                 max_height="650px",
                 overflow_y="auto",
-                force_mount=True ,on_close_auto_focus=Csv_state.clear),force_mount=True)))
+                force_mount=True ,on_close_auto_focus=Csv_state.clear,on_interact_outside=rx.prevent_default),force_mount=True)))
 
 
 
@@ -943,7 +995,7 @@ def complex_form(complex,complex_index,plugin_name,name,complex_list,index=None)
     param=params_dict[plugin_name]["params"][name]
     for param_sub in param['nested']:
         name_id=f'{name}_{param_sub}_{complex_index}'
-        complex_inputs.extend(param_to_input(plugin_name,name, complex_list=complex_list,sub_name=param_sub,default_val=complex[param_sub],name_id=name_id))
+        complex_inputs.extend(param_to_input(plugin_name,name, complex_list=complex_list,sub_name=param_sub,default_val=complex[param_sub],name_id=name_id,index=index))
         
     return rx.card(rx.vstack(*complex_inputs,rx.button(
                             "Delete",
@@ -969,10 +1021,23 @@ def param_to_input(plugin_name,name,complex_list,sub_name=None,default_val='',na
 
         
         if param["type"]!="complex":
+            if name=="code":
+                label=rx.text(
+                    f"{name.replace("_"," ").title()} (code)",
+                    size="2",
+                    margin_bottom="4px",
+                    weight="bold",
+                )
             if name=="timeline_variables":
+                label=rx.text(
+                    f"{name.replace("_"," ").title()} (code)",
+                    size="2",
+                    margin_bottom="4px",
+                    weight="bold",
+                )
                 input=rx.tabs.root(
                     rx.tabs.list(
-                        rx.tabs.trigger("From text", value="tab1"),
+                        rx.tabs.trigger("From code", value="tab1"),
                         rx.tabs.trigger("From csv/excel", value="tab2"),
                     ),
                     rx.tabs.content(
@@ -1016,24 +1081,73 @@ def param_to_input(plugin_name,name,complex_list,sub_name=None,default_val='',na
                         value="tab2",name=name_id+"_csv",
                     ),default_value="tab1",
                 )
-
-            elif param["type"]=="bool":
-                input=rx.cond(
-                    default_val,
-                    rx.switch(
-                                    name=name_id,
-                                    default_checked=True,
-                                    width='100%'
-                                    
-                                ),
-                    rx.switch(
-                                    name=name_id,
-                                    default_checked=False,
-                                    width='100%'
-                                    
-                                )
-
+            elif name=='data_value':
+                label=rx.text(
+                    f"{name.replace("_"," ").title()} (code)",
+                    size="2",
+                    margin_bottom="4px",
+                    weight="bold",
                 )
+                input=rx.tabs.root(
+                    rx.tabs.list(
+                        rx.tabs.trigger("From code", value="tab1"),
+                        rx.tabs.trigger("From csv/excel", value="tab2"),
+                    ),
+                    rx.tabs.content(
+                        
+                        rx.text_area(
+                                name=name_id,
+                                default_value=default_val,
+                                width='100%',margin_bottom="4px",rows='10'
+                            ),value="tab1"
+                    ),
+                    rx.tabs.content(
+                        rx.upload(
+                        rx.vstack(
+                            rx.button(
+                                "Select the csv/excel File",
+                                color=color,
+                                bg="white",
+                                border=f"1px solid {color}",type='button'
+                            ),
+                            rx.text(
+                                "Drag and drop .csv/.xlsx here or click to select the csv/excel file"
+                            ),
+                            
+                           
+                            rx.input(value=Csv_state.current_csv,name=name_id)
+                            
+                
+                        ,align='center'
+                            
+                        ),
+                        id="upload3",
+                        border=f"1px dotted {color}",
+                        padding="5em",
+                        max_files=1,
+                        accept={
+                "application/csv": [".csv"],"application/xlsx": [".xlsx"]
+            },no_keyboard=True,on_drop=Csv_state.handle_csv_upload(rx.upload_files(upload_id="upload3"))),
+                        value="tab2",name=name_id+"_csv",
+                    ),default_value="tab1",
+                )
+            elif param["type"]=="bool":
+                    input=rx.cond(
+                        default_val,
+                        rx.switch(
+                                        name=name_id,
+                                        default_checked=True,
+                                        width='100%'
+                                        
+                                    ),
+                        rx.switch(
+                                        name=name_id,
+                                        default_checked=False,
+                                        width='100%'
+                                        
+                                    )
+
+                    )
             elif param["type"]=="select":
                 if name=='connect':
                     if str(index)=="None":
@@ -1110,27 +1224,60 @@ def plugin_form(plugin_name,simple_params_by_plugin,complex_list,index=None):
                 plugin_param_inputs.extend(param_to_input(plugin_name,param,default_val=simple_params_by_plugin[param],complex_list=complex_list,index=index))
         add_to=[]
         if str(index)=="None":
+            heading=rx.heading("Plugin")
             add_to=[
                 rx.text("Add Point",margin_bottom="4px",weight="bold"),
                 rx.select.root(
                             rx.select.trigger(width='100%'),
                             rx.select.content(
-                                    rx.foreach(State.timeline,lambda val:rx.select.item(f'Before the {val['name']}', value=f'Before the {val['name']}')),rx.select.item('At the end', value='At the end'),width='100%'
+                                    rx.foreach(State.timeline,lambda val,i:rx.select.item(f'Before the {val['name']}', value=f"index_{i}")),rx.select.item('At the end', value='index_-1'),width='100%'
                             ),
-                            default_value='At the end',name='add_or_move_point',width='100%'
+                            default_value='index_-1',name='add_or_move_point',width='100%'
                         )
             ]
         else:
-            add_to=[
-                rx.text("Move",margin_bottom="4px",weight="bold"),
-                rx.select.root(
-                            rx.select.trigger(width='100%'),
-                            rx.select.content(
-                                    rx.select.item('Original', value='Original'),rx.foreach(State.timeline,lambda val:rx.select.item(f'Before the {val['name']}', value=f'Before the {val['name']}')),rx.select.item('At the end', value='At the end'),width='100%'
+            heading=rx.hstack(
+                    rx.heading("Plugin"),
+                    rx.hstack(
+                        rx.text("Disabled"),
+                        rx.checkbox(
+                        name="disabled",
+                        default_checked=simple_params_by_plugin['disabled'],
+                    )),
+                    justify="between",
+                    width="100%"
+                )
+            if plugin_name in ['procedure-end','procedure-start']:
+                add_to=[
+                    rx.text("Move",margin_bottom="4px",weight="bold"),
+                    rx.select.root(
+                                rx.select.trigger(width='100%'),
+                                rx.select.content(
+                                        rx.select.item('Original', value='index_-2'),rx.foreach(State.timeline,lambda val,i:rx.select.item(f'Before the {val['name']}', value=f'index_{i}')),rx.select.item('At the end', value='index_-1'),width='100%'
+                                ),
+                                default_value='index_-2',name='add_or_move_point',width='100%'
+                            )
+                ]
+    
+            else:
+                add_to=[
+                    rx.text("Move",margin_bottom="4px",weight="bold"),
+                    rx.select.root(
+                                rx.select.trigger(width='100%'),
+                                rx.select.content(
+                                        rx.select.item('Original', value='index_-2'),rx.foreach(State.timeline,lambda val,i:rx.select.item(f'Before the {val['name']}', value=f'index_{i}')),rx.select.item('At the end', value='index_-1'),width='100%'
+                                ),
+                                default_value='index_-2',name='add_or_move_point',width='100%'
                             ),
-                            default_value='Original',name='add_or_move_point',width='100%'
-                        )
-            ]
+                    rx.text("Move Type",margin_bottom="4px",weight="bold"),
+                    rx.select.root(
+                                rx.select.trigger(width='100%'),
+                                rx.select.content(
+                                        rx.select.item('Move', value='Move'),rx.select.item('Copy', value='Copy'),width='100%'
+                                ),
+                                default_value='Move',name='move_type',width='100%'
+                            )
+                ]
     
         if len(common_param_inputs)>0:
             section_common=[rx.section(
@@ -1144,7 +1291,7 @@ def plugin_form(plugin_name,simple_params_by_plugin,complex_list,index=None):
             section_common=[]
         plugin_dialog_box=rx.box(
                             rx.section(
-                                rx.heading("Plugin"),
+                                heading,
                                 rx.text("Name",margin_bottom="4px",weight="bold"),
                                 rx.input(name="name",default_value=simple_params_by_plugin["name"]),
                                 *add_to,
@@ -1164,6 +1311,8 @@ def plugin_overlap_add(plugin_name,simple_params_by_plugin,complex_list):
             description=rx.html(f"<a href='https://www.jspsych.org/v{version[0]}/overview/timeline/' target='_blank' rel='noopener noreferrer' style='color: #add8e6; text-decoration: underline;'>More information</a>")
         elif plugin_name in ['code']:
             description=rx.html(f"<a href='https://www.jspsych.org/v{version[0]}/reference/jspsych-data/' target='_blank' rel='noopener noreferrer' style='color: #add8e6; text-decoration: underline;'>More information</a>")
+        elif plugin_name in ['data-variable']:
+            description=rx.html(f"<a href='https://www.jspsych.org/v{version[0]}/reference/jspsych-randomization/' target='_blank' rel='noopener noreferrer' style='color: #add8e6; text-decoration: underline;'>More information</a>")
         else:
             description=rx.html(f"<a href='https://www.jspsych.org/v{version[0]}/plugins/{plugin_name}/' target='_blank' rel='noopener noreferrer' style='color: #add8e6; text-decoration: underline;'>More information</a>")
         plugin_dialog=rx.dialog.root(
@@ -1182,12 +1331,20 @@ def plugin_overlap_add(plugin_name,simple_params_by_plugin,complex_list):
                 rx.form(
                 rx.hstack(
                     rx.dialog.title(f"{plugin_name.replace('-', ' ').title()}"),
+                    rx.hstack(
+                        rx.dialog.close(
+                                    rx.button(
+                                        "Cancel",
+                                        variant="soft",
+                                        color_scheme="gray",type='button'
+                                    ),
+                                ),
                         rx.dialog.close(
                                     rx.button(
                                         "Add",
                                         type="submit",
                                     )
-                                ),
+                                )),
                     justify="between",
                     width="100%"
                 ),
@@ -1220,16 +1377,32 @@ def plugin_overlap_add(plugin_name,simple_params_by_plugin,complex_list):
                 ),
                 max_width="600px",
                 max_height="650px",
-                overflow_y="auto",on_close_auto_focus=[complex_temp_state.clear_complex_temp,Csv_state.clear]
+                overflow_y="auto",on_close_auto_focus=[complex_temp_state.clear_complex_temp,Csv_state.clear],on_interact_outside=rx.prevent_default
             )
         )
         return plugin_dialog
 
 
 def plugin_overlap_edit(plugin_name: str,simple_params_by_plugin: dict[str, Any],index: int,complex_list:list[dict[str, Any]]):
+        if plugin_name in ['procedure-end','procedure-start']:
+            description=rx.html(f"<a href='https://www.jspsych.org/v{version[0]}/overview/timeline/' target='_blank' rel='noopener noreferrer' style='color: #add8e6; text-decoration: underline;'>More information</a>")
+        elif plugin_name in ['code']:
+            description=rx.html(f"<a href='https://www.jspsych.org/v{version[0]}/reference/jspsych-data/' target='_blank' rel='noopener noreferrer' style='color: #add8e6; text-decoration: underline;'>More information</a>")
+        elif plugin_name in ['data-variable']:
+            description=rx.html(f"<a href='https://www.jspsych.org/v{version[0]}/reference/jspsych-randomization/' target='_blank' rel='noopener noreferrer' style='color: #add8e6; text-decoration: underline;'>More information</a>")
+        else:
+            description=rx.html(f"<a href='https://www.jspsych.org/v{version[0]}/plugins/{plugin_name}/' target='_blank' rel='noopener noreferrer' style='color: #add8e6; text-decoration: underline;'>More information</a>")
+        
         plugin_dialog=rx.box(rx.form(rx.hstack(
                     rx.dialog.title(f"{plugin_name.replace('-', ' ').title()}"),
-                    rx.hstack(rx.dialog.close(
+                    rx.hstack(
+                        rx.dialog.close(
+                                rx.button(
+                                    "Cancel",
+                                    variant="soft",
+                                    color_scheme="gray",type='button'
+                                ),
+                            ),rx.dialog.close(
                         rx.button(
                             "Delete",
                             variant="soft",
@@ -1246,8 +1419,7 @@ def plugin_overlap_edit(plugin_name: str,simple_params_by_plugin: dict[str, Any]
                     width="100%"
                 ),
                 rx.dialog.description(''),
-                rx.html(f"<a href='https://www.jspsych.org/v{version[0]}/plugins/{plugin_name}/' target='_blank' rel='noopener noreferrer' style='color: #add8e6; text-decoration: underline;'>More information</a>"),
-                
+                description,                
                     rx.flex(plugin_form(plugin_name,simple_params_by_plugin,complex_list,index=index),
                         rx.flex(
                             rx.dialog.close(
@@ -1295,7 +1467,7 @@ def plugin_button_list() -> rx.Component:
                     align="center",
                     height="10%",
                     overflow_y="auto",
-                    spacing="2",  # 按钮间距
+                    spacing="2",  
                 ),
                 rx.heading("Plugin", margin_bottom="1rem"),
                 rx.vstack(
@@ -1303,7 +1475,7 @@ def plugin_button_list() -> rx.Component:
                     align="center",
                     height="75%",
                     overflow_y="auto",
-                    spacing="2",  # 按钮间距
+                    spacing="2",  
                 ),
                 align="center",
                 
@@ -1409,7 +1581,21 @@ def setting_form(exp_name:str,plugin_source:str,data_save:str,head_script:str) -
                 icon_text_button(icon='settings',text='Experiment Setting')
             ),
             rx.dialog.content(
-                rx.dialog.title("Experiment Settings"),
+                rx.hstack(
+                    rx.dialog.title("Experiment Settings"),
+                    rx.hstack(
+                        rx.dialog.close(
+                                    rx.button(
+                                        "Cancel",
+                                        variant="soft",
+                                        color_scheme="gray",type='button'
+                                    ),
+                                ),
+                        ),
+                    justify="between",
+                    width="100%"
+                ),
+                
                 rx.dialog.description("Fill in to set the experiment settings"),
                 rx.form(
                     rx.flex(
@@ -1445,12 +1631,9 @@ def setting_form(exp_name:str,plugin_source:str,data_save:str,head_script:str) -
                         weight="bold",),
                         rx.text_area(
                             default_value=head_script
-                            ,name='head_script'
+                            ,name='head_script',rows='10'
                         ),
                         rx.flex(
-                            rx.dialog.close(
-                                rx.button("Cancel", variant="soft", color_scheme="gray",type='button'),
-                            ),
                             rx.dialog.close(
                                 rx.button("Save", color_scheme="blue",type='submit'),
                             ),
@@ -1464,7 +1647,7 @@ def setting_form(exp_name:str,plugin_source:str,data_save:str,head_script:str) -
                 on_submit=State.save_exp_settings,
                 reset_on_submit=True,
                 ),
-                max_width="450px",
+                max_width="450px",on_interact_outside=rx.prevent_default
             ),
         
         )
@@ -1477,16 +1660,37 @@ def new_exp_form() -> rx.Component:
                 icon_text_button(icon='file-plus-2',text='New Experiment')
             ),
             rx.dialog.content(
-                rx.dialog.title("New Experiment"),
+                 rx.hstack(
+                    rx.dialog.title("New Experiment"),
+                    rx.hstack(
+                        rx.dialog.close(
+                                    rx.button(
+                                        "Cancel",
+                                        variant="soft",
+                                        color_scheme="gray",type='button'
+                                    ),
+                                ),
+                        ),
+                    justify="between",
+                    width="100%"
+                ),
+                
                 rx.dialog.description("Click the button to create a new experiment"),
                 rx.callout(
                             "This will clean the current experiment!",
                             icon="info", size="1",color_scheme='red',width="100%",margin_top='10px',margin_bottom='10px'
                         ),
-                rx.dialog.close(rx.button(
+                rx.flex(
+                            rx.dialog.close(rx.button(
                             "New Experiment",
                             on_click=[State.new_exp,Uploaded_files_state.delete_all_file],margin_top='10px'
-                        )),max_width="450px"))
+                                    )), 
+                            
+                            justify="start",
+                            spacing="3"
+                        )
+                
+                    ,max_width="450px"))
 
                     
                 
@@ -1498,7 +1702,21 @@ def load_exp_form() -> rx.Component:
                 icon_text_button(icon='cloud-upload',text='Load Experiment')
             ),
             rx.dialog.content(
-                rx.dialog.title("Load Experiment"),
+                
+                rx.hstack(
+                    rx.dialog.title("Load Experiment"),
+                    rx.hstack(
+                        rx.dialog.close(
+                                    rx.button(
+                                        "Cancel",
+                                        variant="soft",
+                                        color_scheme="gray",type='button'
+                                    ),
+                                ),
+                        ),
+                    justify="between",
+                    width="100%"
+                ),
                 rx.dialog.description("Select .zip or .jsexp to load experiment"),
                 rx.callout(
                             "This will overwrite the current experiment!",
@@ -1542,16 +1760,14 @@ def load_exp_form() -> rx.Component:
                                 rx.clear_selected_files("upload2")
                             ],
                         ))
-                        ,rx.dialog.close(
-                                rx.button("Close", variant="soft", color_scheme="gray"),
-                            ),justify="start",spacing="3",width='100%'),
+                        ,justify="start",spacing="3",width='100%'),
 
                     
                     
                     width="100%",margin_top='5px'
                 ),
                 max_width="450px",
-                max_height="550px",
+                max_height="550px"
             ),
         )
 
@@ -1562,13 +1778,34 @@ def save_exp_form(exp_file:str) -> rx.Component:
                 icon_text_button(icon='cloud-download',text='Save Experiment'),on_click=State.save_exp_file
             ),
             rx.dialog.content(
-                rx.dialog.title("Save Experiment"),
-                rx.dialog.description("Click the button below to download your Experiment"),
-                rx.cond(
-                    State.building_exp_file,
-                    rx.button('Preparing',on_click=rx.download(url=rx.get_upload_url(exp_file)),target='_blank',disabled=True,color_scheme='gray',margin_top='10px'),
-                    rx.button('Download',on_click=rx.download(url=rx.get_upload_url(exp_file)),target='_blank',disabled=False,margin_top='10px')
-                    ),
+                 rx.hstack(
+                    rx.dialog.title("Save Experiment"),
+                    rx.hstack(
+                        rx.dialog.close(
+                                    rx.button(
+                                        "Cancel",
+                                        variant="soft",
+                                        color_scheme="gray",type='button'
+                                    ),
+                                ),
+                        ),
+                    justify="between",
+                    width="100%"
+                ),
+                
+                rx.dialog.description("Download your Experiment"),
+                rx.flex(
+                            rx.cond(
+                                State.building_exp_file,
+                                rx.button('Preparing',on_click=rx.download(url=rx.get_upload_url(exp_file)),target='_blank',disabled=True,color_scheme='gray',margin_top='10px'),
+                                rx.dialog.close(
+                                rx.button('Download',on_click=rx.download(url=rx.get_upload_url(exp_file)),target='_blank',disabled=False,margin_top='10px'))
+                                
+                                ),
+                            justify="start",
+                            spacing="3"
+                        ), 
+                
                 
             
                 max_width="450px",force_mount=True
@@ -1591,7 +1828,21 @@ def load_files_form() -> rx.Component:
                 icon_text_button(icon='image-up',text='Load Material Files')
             ),
             rx.dialog.content(
-                rx.dialog.title("Load Material Files"),
+                
+                rx.hstack(
+                    rx.dialog.title("Load Material Files"),
+                    rx.hstack(
+                        rx.dialog.close(
+                                    rx.button(
+                                        "Close",
+                                        variant="soft",
+                                        color_scheme="gray",type='button'
+                                    )
+                                ),
+                        ),
+                    justify="between",
+                    width="100%"
+                ),
                 rx.dialog.description("Load material files used in experiment"),
                 rx.vstack(
                     rx.upload(
@@ -1628,9 +1879,7 @@ def load_files_form() -> rx.Component:
                         rx.button(
                             "Delete All Files",
                             on_click=[Uploaded_files_state.delete_all_file,rx.clear_selected_files("upload1")],
-                        ),rx.dialog.close(
-                                rx.button("Close", variant="soft", color_scheme="gray"),
-                            ),justify="start",spacing="3",width='100%'),
+                        ),justify="start",spacing="3",width='100%'),
                     
                     rx.foreach(
                                 Uploaded_files_state.files,
@@ -1641,7 +1890,7 @@ def load_files_form() -> rx.Component:
                     padding="5em",width="100%",
                 ),
                 max_width="600px",
-                max_height="700px",
+                max_height="700px"
             ),
         )
 
@@ -1701,6 +1950,7 @@ def index():
                 width="100%",
                 background_color="white" 
     )
+    
 
 if mode=='Local':
     app = rx.App(api_transformer=data_upload)
