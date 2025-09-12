@@ -250,7 +250,7 @@ class State(rx.State):
     user_floder:pathlib.Path= rx.get_upload_dir()/'jspsych_exp'
     first_open:bool = True
     simple_params_state:dict[str,dict[str, Any]] = copy.deepcopy(simple_params)
-
+    preview_start: str = 'index_0'
     timeline: list[dict[str, Any]] = []
     complex_list: list[list[dict[str, Any]]] = []
     building_exp_file:bool=False
@@ -474,7 +474,10 @@ class State(rx.State):
         self.data_save = setting_json['data_save']
         await self.refresh_iframe()
 
-    
+    def set_preview_start(self, value):
+        if value=='' or value==None:
+            value='index_0'
+        self.preview_start = value
 
     def create_preview_file(self,preview_html):
         filename = "index_preview.html"
@@ -540,13 +543,20 @@ class State(rx.State):
     async def refresh_iframe(self):
         if len(self.timeline)!=0:
             
+            preview_start=int(self.preview_start.replace('index_',''))
+            if preview_start<0 :
+                preview_start=0
+                self.preview_start='index_0'
+            elif preview_start>=len(self.timeline):
+                preview_start=len(self.timeline)-1
+                self.preview_start=f'index_{preview_start}'
             timeline_date=[]
             
             for timepoint in self.timeline:
                 timeline_date.append(self.timeline_temp_to_date(timepoint))
             #print(timeline_date)
             my_exp=Expriment(self.exp_name,plugin_all=plugin_registry, timeline_list=timeline_date,data_save=self.data_save,plugin_source=self.plugin_source,head_script=self.head_script)
-            self.create_preview_file(my_exp.preview())
+            self.create_preview_file(my_exp.preview(preview_start))
             
         else:
             self.create_preview_file(self.preview_html_default)
@@ -1047,7 +1057,7 @@ def param_to_input(plugin_name,name,complex_list,sub_name=None,default_val='',na
                                 default_value=default_val,
                                 width='100%',margin_bottom="4px",rows='10'
                             ),rx.callout(
-                            rx.html("Use <em><b>jsPsych.timelineVariable(variable_name)</b></em> within the procedure."),
+                            rx.html("Use <em><b>jsPsych.timelineVariable(variable_name)</b></em> or <em><b>jsPsych.evaluateTimelineVariable(variable_name)</b></em> within the procedure."),
                             icon="info", size="1"
                         ),value="tab1"
                     ),
@@ -1518,16 +1528,22 @@ def timeline_flow(timeline:list[dict[str, Any]]) -> rx.Component:
 @rx.memo
 def preview_win(iframe_key:int)  -> rx.Component:
     return rx.box(
-                rx.hstack(
-                    rx.heading("Preview"),
-                    rx.button(rx.box(style=circle_style), on_click=State.refresh_iframe_simple,
-                                padding="0",             
-                                border="none",          
-                                bg="transparent",     
-                                width="32px",           
-                                height="32px",          
-                                _hover={"bg": "transparent"}, 
-                                _active={"bg": "transparent"})),
+                    rx.hstack(rx.hstack(
+                        rx.heading("Preview"),
+                        rx.button(rx.box(style=circle_style), on_click=State.refresh_iframe_simple,
+                                    padding="0",             
+                                    border="none",          
+                                    bg="transparent",     
+                                    width="32px",           
+                                    height="32px",          
+                                    _hover={"bg": "transparent"}, 
+                                    _active={"bg": "transparent"})),rx.hstack(rx.select.root(
+                            rx.select.trigger(width='100%'),
+                            rx.select.content(
+                                    rx.foreach(State.timeline,lambda val,i:rx.select.item(f'{val['name']}', value=f"index_{i}",width='100%')),width='100%',
+                            ),
+                            default_value='index_0',value=State.preview_start,name='preview_start',width='20%',on_change=[State.set_preview_start,State.refresh_iframe],
+                        )), justify="between",width='100%'),
                 rx.el.iframe(
                     src=f"{rx.get_upload_url(State.preview_file)}?id={iframe_key}",
                     width="100%",
