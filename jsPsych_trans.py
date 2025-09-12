@@ -288,7 +288,7 @@ class Plugin:
             'on_start':{"type":"function","default":'function(){ return; }',"value":'function(){ return; }',"array":False,"undefined":False,"common":True},
             'on_finish':{"type":"function","default":'function(){ return; }',"value":'function(){ return; }',"array":False,"undefined":False,"common":True},
             'on_load':{"type":"function","default":'function(){ return; }',"value":'function(){ return; }',"array":False,"undefined":False,"common":True},
-            'css_classes':{"type":"string","default":None,"value":None,"array":False,"undefined":False,"common":True},
+            'css_classes':{"type":"string","default":[],"value":[],"array":True,"undefined":False,"common":True},
             'save_trial_parameters':{"type":"object","default":"{}","value":"{}","array":False,"undefined":False,"common":True},
             'save_timeline_variables':{"type":"free","default":False,"value":False,"array":True,"undefined":False,"common":True},
             'record_data':{"type":"bool","default":True,"value":True,"array":False,"undefined":False,"common":True},
@@ -673,7 +673,7 @@ def registry_plugin():
 import time
     
 class Expriment:
-    def __init__(self,file_name,plugin_source='Web',data_save='Local',name=None,timeline_list=None,plugin_all=None,head_script=''):
+    def __init__(self,file_name,plugin_source='Local',data_save='Local',name=None,timeline_list=None,plugin_all=None,head_script=''):
         self.file_name=file_name
         self.head_script=head_script
         if name:
@@ -777,12 +777,17 @@ class Expriment:
         if name in self.plugin_used:
             del self.plugin_used[name]
 
-    def timeline_to_js(self):
+    def timeline_to_js(self,plugin_source_type,start_point=0):
         plugin_define=""
         plugin_source=""
         plugin_source_added=[]
         in_procedure=[]
+        count_plugin=-1
         for plugin in self.timeline:
+            count_plugin+=1
+            if self.plugin_used[plugin].class_name not in ['code','data-variable'] and count_plugin<start_point:
+                continue
+            
             if self.plugin_used[plugin].class_name=='procedure-start':
                 in_procedure.append(plugin)
                 continue
@@ -804,7 +809,7 @@ class Expriment:
                 plugin_define+=self.plugin_used[plugin].to_js(js_type='push')
 
             if self.plugin_used[plugin].plugin_name not in plugin_source_added:
-                plugin_source+=self.plugin_used[plugin].js_source(self.plugin_source)
+                plugin_source+=self.plugin_used[plugin].js_source(plugin_source_type)
                 plugin_source_added.append(self.plugin_used[plugin].plugin_name)
  
         if len(in_procedure)>0:
@@ -815,7 +820,8 @@ class Expriment:
                     plugin_define+=self.plugin_used[in_procedure[len(in_procedure)-i-1]].to_js(js_type='define')
                     self.plugin_used[in_procedure[len(in_procedure)-i-1-1]].timeline.append(in_procedure[len(in_procedure)-i-1])
         return plugin_source,plugin_define
-    def to_js(self, plugin_source_type, data_save_type):
+    
+    def to_js(self, plugin_source_type, data_save_type,start_point=0):
         template="""
 <!DOCTYPE html>
 <html>
@@ -899,7 +905,7 @@ class Expriment:
         for line in head_script_split:
             head_script+=f"    {line.strip()}\n"
         template=template.replace('[[[[head_script]]]]',head_script)
-        plugin_source,plugin_define=self.timeline_to_js()
+        plugin_source,plugin_define=self.timeline_to_js(self.plugin_source,start_point)
 
         if data_save_type=='NAODAO':
             save_plugin=self.plugin_all['html-keyboard-response'](self,name='naodao_save_date')
@@ -913,8 +919,8 @@ class Expriment:
         template=template.replace('[[[[plugin_define]]]]',plugin_define)
 
         return template 
-    def preview(self):
-        return self.to_js('Web','Display')
+    def preview(self,start_point=0):
+        return self.to_js(self.plugin_source,'Display',start_point)
     def export(self):
         return self.to_js(self.plugin_source,self.data_save)
 
